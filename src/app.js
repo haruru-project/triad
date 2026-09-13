@@ -1,6 +1,6 @@
 import {
   PROVIDERS, PROVIDER_BY_ID, STATUS, send, setManualCopyHandler,
-  resolveTransport, readClipboard, deepLink,
+  resolveTransport, readClipboard, deepLink, canCarryPrompt,
 } from './providers.js';
 import { historyFor, buildCrossPrompt, buildCritiquePrompt, buildQuotePrompt } from './prompt.js';
 import * as db from './db.js';
@@ -131,13 +131,23 @@ function renderCard(turn, p) {
     } else {
       pill = '<span class="pill idle">未送信</span>';
       if (cfg.mode === 'api') acts = btn('send', '送信', 'primary-sm');
-      // コピーと遷移を1アクションに統合。プロンプトはURLに載るので貼り付けも要らない。
-      else if (copyMode) acts = btn('go', '開く ↗', 'primary-sm') + btn('send', 'コピーだけ');
-      else acts = btn('send', '送る', 'primary-sm');
+      else if (copyMode) {
+        // プロンプトをURLで渡せない相手（Gemini）は貼り付けが要る。
+        // 同じ「開く ↗」に見せると必ず事故るので文言で区別する。
+        const carries = canCarryPrompt(p.id, turn.promptFor[p.id] || turn.question);
+        acts = btn('go', carries ? '開く ↗' : 'コピーして開く ↗', 'primary-sm')
+          + btn('send', 'コピーだけ');
+      } else acts = btn('send', '送る', 'primary-sm');
     }
-    const note = a.status === STATUS.ERROR && a.error
-      ? `<div class="cnote err">${esc(a.error)}</div>`
-      : (a.note ? `<div class="cnote warn">${esc(a.note)}</div>` : '');
+    let note = '';
+    if (a.status === STATUS.ERROR && a.error) {
+      note = `<div class="cnote err">${esc(a.error)}</div>`;
+    } else if (a.note) {
+      note = `<div class="cnote warn">${esc(a.note)}</div>`;
+    } else if (a.status === STATUS.PENDING && copyMode
+      && !canCarryPrompt(p.id, turn.promptFor[p.id] || turn.question)) {
+      note = '<div class="cnote">プロンプトはクリップボードにあります。相手先で貼り付けてください。</div>';
+    }
 
     return `<article class="card slim" style="--p:${p.color}">
       <div class="crow">${ident}${pill}<span class="grow"></span><span class="cacts">${acts}</span></div>
@@ -544,7 +554,21 @@ elTurns.addEventListener('click', async (e) => {
     const targets = PROVIDERS.filter((p) =>
       turn.answers[p.id].status === STATUS.IDLE && settings.providers[p.id].mode !== 'api');
     for (const p of targets) openProvider(turn, p.id);
-    for (const p of targets) await sendOne(turnId, p.id);
+
+    // クリップボードは1つしかない。URL でプロンプトを渡せない相手（Gemini）を
+    // 最後にコピーして、貼り付けが必要な側の文面が残るようにする。
+    const order = [...targets].sort((a, b) =>
+      Number(canCarryPrompt(a.id, turn.promptFor[a.id] || turn.question))
+      - Number(canCarryPrompt(b.id, turn.promptFor[b.id] || turn.question))).reverse();
+    for (const p of order) await sendOne(turnId, p.id);
+
+    const needPaste = targets.filter((p) =>
+      !canCarryPrompt(p.id, turn.promptFor[p.id] || turn.question));
+    if (needPaste.length === 1) {
+      toast(`${needPaste[0].name} は貼り付けが要ります（プロンプトはコピー済み）`);
+    } else if (needPaste.length > 1) {
+      toast(`${needPaste.map((p) => p.name).join('・')} は貼り付けが要りますが、クリップボードには ${needPaste[needPaste.length - 1].name} の分しか残りません。1社ずつ開いてください。`);
+    }
     return;
   }
 

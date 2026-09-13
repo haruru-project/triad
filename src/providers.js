@@ -16,6 +16,7 @@ export const PROVIDERS = [
     defaultModel: 'gpt-5.1',
     keyHint: 'platform.openai.com で発行 (sk-...)',
     web: 'https://chatgpt.com/',
+    promptParam: 'q',   // 実機確認済み
   },
   {
     id: 'anthropic',
@@ -25,6 +26,7 @@ export const PROVIDERS = [
     defaultModel: 'claude-opus-5',
     keyHint: 'console.anthropic.com で発行 (sk-ant-...)',
     web: 'https://claude.ai/new',
+    promptParam: 'q',   // 実機確認済み
   },
   {
     id: 'google',
@@ -34,6 +36,7 @@ export const PROVIDERS = [
     defaultModel: 'gemini-3-pro',
     keyHint: 'aistudio.google.com で発行（無料枠あり）',
     web: 'https://gemini.google.com/app',
+    promptParam: null,  // ?q= は無視される。貼り付けが要る
   },
 ];
 
@@ -53,17 +56,33 @@ export function canShare() {
 }
 
 // URL にプロンプトを載せて開けば、相手先での貼り付け操作が丸ごと消える。
-// ChatGPT は ?q= が効くことを実機で確認済み（?prompt= に転送され入力欄に入る／送信は手動）。
-// Claude・Gemini は未確認。効かなくてもクリップボードには載っているので貼れば済む。
+//
+// 実機で確認した結果（2026-09-13）:
+//   ChatGPT … ?q= が効く（?prompt= に転送され入力欄に入る。送信は手動）
+//   Claude  … ?q= が効く（入力欄に入る。送信は手動）
+//   Gemini  … ?q= は無視される。パラメータごと捨てられ空の画面が開く
+//
+// 対応していない相手にはクリップボード経由で渡すしかないので、
+// UI 側でボタンの文言を変えて「貼り付けが要る」と分かるようにしている。
 const DEEPLINK_MAX = 1500;
+
+export function supportsDeepLink(providerId) {
+  const p = PROVIDER_BY_ID[providerId];
+  return !!(p && p.web && p.promptParam);
+}
 
 export function deepLink(providerId, prompt) {
   const p = PROVIDER_BY_ID[providerId];
-  if (!p || !p.web) return null;
+  if (!supportsDeepLink(providerId)) return null;
   const q = encodeURIComponent(prompt || '');
   // 長いプロンプト（相互レビュー等）は URL 長の上限に当たるので載せない
   if (!q || q.length > DEEPLINK_MAX) return null;
-  return p.web + (p.web.indexOf('?') === -1 ? '?' : '&') + 'q=' + q;
+  return p.web + (p.web.indexOf('?') === -1 ? '?' : '&') + p.promptParam + '=' + q;
+}
+
+/** そのターンのプロンプトが実際にURLで渡せるか（長さも込みで判定） */
+export function canCarryPrompt(providerId, prompt) {
+  return deepLink(providerId, prompt) !== null;
 }
 
 export function isAndroid() {

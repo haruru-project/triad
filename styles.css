@@ -298,3 +298,4 @@ dialog menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; ma
   padding: 4px 10px; font-size: 13px; opacity: .85;
 }
 .toast button:hover { background: transparent; opacity: 1; }
+.cnote { color: var(--fg-2); }
