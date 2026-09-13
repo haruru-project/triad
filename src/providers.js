@@ -14,6 +14,10 @@ export const PROVIDERS = [
     color: '#10a37f',
     // NOTE: モデルIDは各社の公式ドキュメントで要確認。設定画面から変更可。
     defaultModel: 'gpt-5.1',
+    defaultModelDeep: 'gpt-5.1',
+    // $/1M トークン。OpenAI の実価格は未確認なので 0 のまま。
+    // 設定画面で入れると、そのプロバイダも合計に算入される。
+    price: { in: 0, out: 0, inDeep: 0, outDeep: 0 },
     keyHint: 'platform.openai.com で発行 (sk-...)',
     web: 'https://chatgpt.com/',
     promptParam: 'q',   // 実機確認済み
@@ -23,7 +27,10 @@ export const PROVIDERS = [
     name: 'Claude',
     short: 'CLD',
     color: '#d97757',
-    defaultModel: 'claude-opus-5',
+    defaultModel: 'claude-sonnet-5',
+    defaultModelDeep: 'claude-opus-5',
+    // 公式価格（確認済み）: Sonnet 5 = $2/$10、Opus 5 = $5/$25
+    price: { in: 2, out: 10, inDeep: 5, outDeep: 25 },
     keyHint: 'console.anthropic.com で発行 (sk-ant-...)',
     web: 'https://claude.ai/new',
     promptParam: 'q',   // 実機確認済み
@@ -34,6 +41,8 @@ export const PROVIDERS = [
     short: 'GEM',
     color: '#4285f4',
     defaultModel: 'gemini-3-pro',
+    defaultModelDeep: 'gemini-3-pro',
+    price: { in: 0, out: 0, inDeep: 0, outDeep: 0 },
     keyHint: 'aistudio.google.com で発行（無料枠あり）',
     web: 'https://gemini.google.com/app',
     promptParam: null,  // ?q= は無視される。貼り付けが要る
@@ -123,7 +132,13 @@ async function callOpenAI({ apiKey, model, messages }) {
   });
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text()}`);
   const json = await res.json();
-  return json.choices?.[0]?.message?.content ?? '';
+  return {
+    text: json.choices?.[0]?.message?.content ?? '',
+    usage: {
+      input: json.usage?.prompt_tokens ?? 0,
+      output: json.usage?.completion_tokens ?? 0,
+    },
+  };
 }
 
 async function callAnthropic({ apiKey, model, messages }) {
@@ -170,7 +185,13 @@ async function callGoogle({ apiKey, model, messages }) {
   });
   if (!res.ok) throw new Error(`Google ${res.status}: ${await res.text()}`);
   const json = await res.json();
-  return (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  return {
+    text: (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join(''),
+    usage: {
+      input: json.usageMetadata?.promptTokenCount ?? 0,
+      output: json.usageMetadata?.candidatesTokenCount ?? 0,
+    },
+  };
 }
 
 const API_CALLERS = {
@@ -192,12 +213,13 @@ export async function send(providerId, cfg, messages, opts) {
   if (cfg.mode === 'api') {
     if (!cfg.apiKey) throw new Error('APIキーが未設定です');
     const caller = API_CALLERS[providerId];
-    const text = await caller({
-      apiKey: cfg.apiKey,
-      model: cfg.model || PROVIDER_BY_ID[providerId].defaultModel,
-      messages,
-    });
-    return { mode: 'api', text };
+    // 1往復目は中位、深堀りだけ上位。ここが費用の効きどころ。
+    const tier = (opts && opts.tier) === 'deep' ? 'deep' : 'normal';
+    const model = tier === 'deep'
+      ? (cfg.modelDeep || cfg.model || PROVIDER_BY_ID[providerId].defaultModelDeep)
+      : (cfg.model || PROVIDER_BY_ID[providerId].defaultModel);
+    const res = await caller({ apiKey: cfg.apiKey, model, messages });
+    return { mode: 'api', text: res.text, usage: res.usage, model, tier };
   }
 
   // 手動モード: 共有もコピーも毎回「新しいチャット」を開くため、相手側に履歴が残らない。

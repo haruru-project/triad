@@ -299,3 +299,10 @@ dialog menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; ma
 }
 .toast button:hover { background: transparent; opacity: 1; }
 .cnote { color: var(--fg-2); }
+
+.meter {
+  font-size: 13px; color: var(--fg-2);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; white-space: nowrap;
+}
+.pricerow { display: flex; gap: 8px; }

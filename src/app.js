@@ -17,8 +17,16 @@ function defaultSettings() {
     // 端末ごとの手動送受信の方式。プロバイダ設定とは別軸。
     // Android は共有シート、PC はコピー＋Webを開く、が既定（auto）。
     device: { transport: 'auto', autoCapture: true },
+    yenPerUsd: 150,
     providers: Object.fromEntries(
-      PROVIDERS.map((p) => [p.id, { mode: 'share', apiKey: '', model: p.defaultModel, enabled: true }])
+      PROVIDERS.map((p) => [p.id, {
+        mode: 'share',
+        apiKey: '',
+        enabled: true,
+        model: p.defaultModel,          // 1往復目に使う中位モデル
+        modelDeep: p.defaultModelDeep,  // 深堀りだけ使う上位モデル
+        price: { ...p.price },          // $/1M トークン
+      }])
     ),
   };
 }
@@ -191,10 +199,17 @@ async function sendOne(turnId, pid) {
   render();
 
   try {
-    const res = await send(pid, cfg, messages, { transport: currentTransport() });
+    const res = await send(pid, cfg, messages, {
+      transport: currentTransport(),
+      tier: turn.tier || 'normal',
+    });
     if (res.mode === 'api') {
       a.status = STATUS.DONE;
       a.text = res.text;
+      a.usage = res.usage;
+      a.model = res.model;
+      a.tier = res.tier;
+      await addSpend(pid, res.tier, res.usage);
     } else if (res.via === 'clipboard') {
       // 自分で載せたプロンプトを「戻ってきた回答」と誤認しないよう既知にしておく
       lastClipboardSeen = messages[messages.length - 1].content;
@@ -243,6 +258,76 @@ async function ask(question) {
   }
   const promptFor = Object.fromEntries(targets.map((id) => [id, question]));
   await addTurn(newTurn(question, promptFor, targets));
+}
+
+// ---------------------------------------------------------------- コスト実測
+
+// 価格表は推測が入る（Anthropic 以外は公式価格を確認できていない）。
+// だからトークン数は必ず API の実測値を積み、円換算だけを設定で調整させる。
+// 価格が 0 のプロバイダは合計から除外し、その旨を画面に出す。
+
+function monthKey(d) {
+  const t = d || new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+}
+
+let ledger = null; // { '2026-09': { openai: {in, out, inDeep, outDeep, calls} , ... } }
+
+async function loadLedger() {
+  ledger = (await db.get(db.STORE_KV, 'ledger')) || {};
+}
+
+async function addSpend(pid, tier, usage) {
+  if (!usage) return;
+  const mk = monthKey();
+  const month = (ledger[mk] = ledger[mk] || {});
+  const rec = (month[pid] = month[pid] || { in: 0, out: 0, inDeep: 0, outDeep: 0, calls: 0 });
+  if (tier === 'deep') {
+    rec.inDeep += usage.input || 0;
+    rec.outDeep += usage.output || 0;
+  } else {
+    rec.in += usage.input || 0;
+    rec.out += usage.output || 0;
+  }
+  rec.calls += 1;
+  await db.put(db.STORE_KV, ledger, 'ledger');
+  renderMeter();
+}
+
+/** 今月の実測コスト。価格未設定のプロバイダは金額に入れず名前を返す。 */
+function monthCost() {
+  const month = ledger[monthKey()] || {};
+  const rate = Number(settings.yenPerUsd) || 150;
+  let usd = 0;
+  let calls = 0;
+  const unpriced = [];
+  for (const p of PROVIDERS) {
+    const rec = month[p.id];
+    if (!rec) continue;
+    calls += rec.calls;
+    const pr = settings.providers[p.id].price || {};
+    const used = (rec.in + rec.out) > 0;
+    const usedDeep = (rec.inDeep + rec.outDeep) > 0;
+    if ((used && !(pr.in || pr.out)) || (usedDeep && !(pr.inDeep || pr.outDeep))) {
+      unpriced.push(p.name);
+    }
+    usd += (rec.in / 1e6) * (pr.in || 0) + (rec.out / 1e6) * (pr.out || 0);
+    usd += (rec.inDeep / 1e6) * (pr.inDeep || 0) + (rec.outDeep / 1e6) * (pr.outDeep || 0);
+  }
+  return { yen: usd * rate, calls, unpriced };
+}
+
+function renderMeter() {
+  const el = $('#meter');
+  if (!el) return;
+  const anyApi = PROVIDERS.some((p) => settings.providers[p.id].mode === 'api');
+  if (!anyApi) { el.hidden = true; return; }
+  const { yen, calls, unpriced } = monthCost();
+  el.hidden = false;
+  el.textContent = unpriced.length
+    ? `今月 ¥${Math.round(yen)}（${calls}回・${unpriced.join('/')}は価格未設定）`
+    : `今月 ¥${Math.round(yen)}（${calls}回）`;
+  el.title = '実際に使ったトークン数から計算した概算です';
 }
 
 // ---------------------------------------------------------------- 遷移と自動取り込み
@@ -617,6 +702,7 @@ elTurns.addEventListener('click', async (e) => {
     if (!fu) return;
     const t = newTurn(fu, { [pid]: buildQuotePrompt(quote, fu) }, [pid]);
     t.kind = `${PROVIDER_BY_ID[pid].name}を深堀り`;
+    t.tier = 'deep'; // 深堀りだけ上位モデルを使う
     await addTurn(t);
     return;
   }
@@ -762,8 +848,20 @@ function renderSettings() {
         <option value="share" ${c.mode === 'share' ? 'selected' : ''}>手動（アプリ / Web 経由・無料）</option>
         <option value="api" ${c.mode === 'api' ? 'selected' : ''}>API（自動・従量課金）</option>
       </select>
-      <label>モデルID</label>
+      <label>通常モデル（1往復目）</label>
       <input type="text" data-f="model" value="${esc(c.model)}" placeholder="${esc(p.defaultModel)}">
+      <label>深堀りモデル（上位）</label>
+      <input type="text" data-f="modelDeep" value="${esc(c.modelDeep || '')}" placeholder="${esc(p.defaultModelDeep)}">
+      <label>価格 $/1M トークン（通常: 入力 / 出力）</label>
+      <div class="pricerow">
+        <input type="number" step="0.01" min="0" data-f="price.in" value="${c.price.in}">
+        <input type="number" step="0.01" min="0" data-f="price.out" value="${c.price.out}">
+      </div>
+      <label>価格 $/1M トークン（深堀り: 入力 / 出力）</label>
+      <div class="pricerow">
+        <input type="number" step="0.01" min="0" data-f="price.inDeep" value="${c.price.inDeep}">
+        <input type="number" step="0.01" min="0" data-f="price.outDeep" value="${c.price.outDeep}">
+      </div>
       <label>APIキー<span class="dim"> — ${esc(p.keyHint)}</span></label>
       <input type="password" data-f="apiKey" value="${esc(c.apiKey)}" autocomplete="off">
     </div>`;
@@ -786,9 +884,14 @@ $('#settings-body').addEventListener('change', async (e) => {
   const f = e.target.dataset.f;
   if (!f) return;
   const pid = wrap.dataset.p;
-  settings.providers[pid][f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  if (f.indexOf('price.') === 0) {
+    settings.providers[pid].price[f.slice(6)] = Number(e.target.value) || 0;
+  } else {
+    settings.providers[pid][f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  }
   await saveSettings();
   render();
+  renderMeter();
 });
 
 $('#btn-settings').addEventListener('click', () => {
@@ -806,14 +909,23 @@ async function boot() {
   settings = stored || d;
   // 後から増えたプロバイダ / 設定項目を埋める
   for (const id of Object.keys(d.providers)) {
-    settings.providers[id] = Object.assign({}, d.providers[id], settings.providers[id] || {});
+    const stored2 = settings.providers[id] || {};
+    settings.providers[id] = Object.assign({}, d.providers[id], stored2);
+    // price は入れ子なので個別にマージしないと、後から増えた項目が undefined になる
+    settings.providers[id].price = Object.assign({}, d.providers[id].price, stored2.price || {});
   }
+  if (typeof settings.yenPerUsd !== 'number') settings.yenPerUsd = d.yenPerUsd;
   settings.device = Object.assign({}, d.device, settings.device || {});
 
+  await loadLedger();
   turns = (await db.getAll(db.STORE_TURNS)).sort((a, b) => a.createdAt - b.createdAt);
   render();
+  renderMeter();
 
-  if (currentTransport() === 'copy') {
+  // 全社 API なら手動の案内は不要（出しっぱなしだと嘘になる）
+  const anyManual = PROVIDERS.some((p) =>
+    settings.providers[p.id].enabled && settings.providers[p.id].mode !== 'api');
+  if (anyManual && currentTransport() === 'copy') {
     const w = $('#env-warn');
     w.hidden = false;
     w.textContent = settings.device.autoCapture
