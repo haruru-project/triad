@@ -13,11 +13,12 @@ export const PROVIDERS = [
     short: 'GPT',
     color: '#10a37f',
     // NOTE: モデルIDは各社の公式ドキュメントで要確認。設定画面から変更可。
-    defaultModel: 'gpt-5.1',
-    defaultModelDeep: 'gpt-5.1',
-    // $/1M トークン。OpenAI の実価格は未確認なので 0 のまま。
-    // 設定画面で入れると、そのプロバイダも合計に算入される。
-    price: { in: 0, out: 0, inDeep: 0, outDeep: 0 },
+    // 公式価格表で確認（2026-09-13）
+    //   gpt-5.6-terra $2/$12 ／ gpt-5.6-sol $4/$20 ／ gpt-6-astra $10/$50
+    // Chat Completions でも新モデルは使える（Responses API 推奨だが必須ではない）
+    defaultModel: 'gpt-5.6-terra',
+    defaultModelDeep: 'gpt-5.6-sol',
+    price: { in: 2, out: 12, inDeep: 4, outDeep: 20 },
     keyHint: 'platform.openai.com で発行 (sk-...)',
     web: 'https://chatgpt.com/',
     promptParam: 'q',   // 実機確認済み
@@ -27,9 +28,9 @@ export const PROVIDERS = [
     name: 'Claude',
     short: 'CLD',
     color: '#d97757',
+    // 公式価格で確認（2026-09-13）: Sonnet 5 $2/$10 ／ Opus 5 $5/$25
     defaultModel: 'claude-sonnet-5',
     defaultModelDeep: 'claude-opus-5',
-    // 公式価格（確認済み）: Sonnet 5 = $2/$10、Opus 5 = $5/$25
     price: { in: 2, out: 10, inDeep: 5, outDeep: 25 },
     keyHint: 'console.anthropic.com で発行 (sk-ant-...)',
     web: 'https://claude.ai/new',
@@ -40,9 +41,13 @@ export const PROVIDERS = [
     name: 'Gemini',
     short: 'GEM',
     color: '#4285f4',
-    defaultModel: 'gemini-3-pro',
-    defaultModelDeep: 'gemini-3-pro',
-    price: { in: 0, out: 0, inDeep: 0, outDeep: 0 },
+    // 公式価格表で確認（2026-09-13）
+    //   gemini-3.8-flash は無料枠あり。有料時 $0.75/$3.75（2026-12-31まで。以降 $1.50/$7.50）
+    //   gemini-3.1-pro-preview は無料枠なし $2/$12（200k超は $4/$18）
+    //   無料で Pro 級が要るなら gemini-2.5-pro（無料枠あり／有料 $1.25/$10）に変える
+    defaultModel: 'gemini-3.8-flash',
+    defaultModelDeep: 'gemini-3.1-pro-preview',
+    price: { in: 0.75, out: 3.75, inDeep: 2, outDeep: 12 },
     keyHint: 'aistudio.google.com で発行（無料枠あり）',
     web: 'https://gemini.google.com/app',
     promptParam: null,  // ?q= は無視される。貼り付けが要る
