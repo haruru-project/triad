@@ -1,0 +1,7 @@
+# OS / エディタ
+Thumbs.db
+.DS_Store
+*.swp
+
+# ローカル設定
+.claude/settings.local.json

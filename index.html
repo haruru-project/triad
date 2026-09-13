@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Triad - 3社同時質問</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11151b" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // 描画前に同期で当てないとテーマが一瞬入れ替わる。
+  // IndexedDB は非同期で間に合わないので、表示設定だけ localStorage を使う。
+  try {
+    var t = localStorage.getItem('triad-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>TRIAD</h1>
+  <span class="sub">3社に同時に聞く</span>
+  <span class="grow"></span>
+  <button id="btn-theme" class="chip" title="表示テーマ">自動</button>
+  <button id="btn-settings" class="icon" title="設定">⚙</button>
+</header>
+
+<div id="env-warn" class="banner" hidden></div>
+
+<div id="empty" class="empty">
+  <h2>質問を1つ書いて、3社に投げます</h2>
+  <p>各カードの「送る」で共有シートが開きます。1社ずつ送るのが最短です。</p>
+  <p>アプリで回答が出たら、その回答を共有メニューから Triad に戻してください。</p>
+</div>
+
+<main id="turns" class="turns"></main>
+
+<footer class="composer">
+  <textarea id="q" rows="2" placeholder="質問を入力（キーボードのマイクでも音声入力できます）"></textarea>
+  <div class="composer-row">
+    <button id="btn-mic" class="icon" title="音声入力">🎤</button>
+    <span id="mic-state" class="dim small"></span>
+    <div class="spacer"></div>
+    <button id="btn-ask" class="primary">3社に聞く</button>
+  </div>
+</footer>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- 回答の帰属を選ばせるダイアログ -->
+<dialog id="dlg-pick">
+  <form method="dialog">
+    <h2>この回答は誰のもの？</h2>
+    <pre id="pick-preview" class="preview"></pre>
+    <div id="pick-options" class="pick-options"></div>
+    <menu>
+      <button value="cancel" class="ghost">破棄</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- 追加質問の入力 -->
+<dialog id="dlg-followup">
+  <form method="dialog">
+    <h2 id="fu-title">深堀り</h2>
+    <p id="fu-desc" class="dim small"></p>
+    <textarea id="fu-text" rows="4" placeholder="何を掘り下げますか？"></textarea>
+    <menu>
+      <button value="cancel" class="ghost">やめる</button>
+      <button value="ok" class="primary">作成</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- 手貼り付け -->
+<dialog id="dlg-paste">
+  <form method="dialog">
+    <h2>回答を貼り付け</h2>
+    <p id="paste-desc" class="dim small"></p>
+    <textarea id="paste-text" rows="8" placeholder="アプリからコピーした回答を貼り付け"></textarea>
+    <menu>
+      <button value="cancel" class="ghost">やめる</button>
+      <button value="ok" class="primary">登録</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- 共有もクリップボードも使えないときの手動コピー -->
+<dialog id="dlg-copy">
+  <form method="dialog">
+    <h2>手動でコピーしてください</h2>
+    <p class="dim small">クリップボードへの自動コピーが拒否されました。下のテキストを選択してコピーし、アプリに貼ってください。</p>
+    <textarea id="copy-text" rows="8" readonly></textarea>
+    <menu>
+      <button value="ok" class="primary">閉じる</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- 設定 -->
+<dialog id="dlg-settings">
+  <form method="dialog">
+    <h2>設定</h2>
+    <div id="settings-body"></div>
+    <p class="dim small">
+      APIキーはこの端末のブラウザ内（IndexedDB）にのみ保存されます。
+      共有端末では使わないでください。
+    </p>
+    <menu>
+      <button value="ok" class="primary">閉じる</button>
+    </menu>
+  </form>
+</dialog>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
